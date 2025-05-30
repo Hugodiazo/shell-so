@@ -20,14 +20,14 @@
 #include <sys/wait.h>
 
 // estados en proceso y tareas
-enum status { SUSPENDED, SIGNALED, EXITED, CONTINUED};
+enum status { SUSPENDED, SIGNALED, EXITED, CONTINUED};  // declara nombres asociado a numeros 
 enum job_state { FOREGROUND, BACKGROUND, STOPPED };
 // Strings para mostrar por pantalla
 static char* status_strings[] = { "Suspended", "Signaled", "Exited", "Continued"};
 static char* state_strings[] = { "Foreground", "Background", "Stopped" };
 
 // Estructura que representa una tarea (job)
-typedef struct job_
+typedef struct job_   // item
 {
 	pid_t pgid; // ID de grupo de procesos
     char * command; // Nombre del comando

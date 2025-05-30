@@ -13,11 +13,53 @@
  *	(then type ^D to exit program)
 **/
 
+// job = tarea
+
 #include "job_control.h"   /* Remember to compile with module job_control.c */
 
 #define MAX_LINE 256 // Máximo número de caracteres que puede tener un comando
 
 
+job *tareas;   // declara globalmente lista de tareas
+
+void manejador(int senal){
+    job *item = tareas->next;
+    job *next_item;
+    int status, info, pid_wait;
+    enum status status_res;
+
+
+    block_SIGCHLD();       // Cada vez que accedés o modificás la lista tareas (blockear y desbloquear) (add_job, delete_job, get_item_bypos, etc)
+
+    while (item != NULL) {
+
+        next_item = item->next; //  Guardas el siguiente antes de borrar el actual
+        pid_wait = waitpid(item->pgid, &status, WNOHANG | WUNTRACED | WCONTINUED);   // hacer un wait a cada comando y recoger 
+        // el waitpid recoge solo si pid_wait cambia de valor. pid_wait guarda el proceso q recoge waitpid
+        
+        if (pid_wait == item->pgid){
+        status_res = analyze_status(status, &info);  // ver estado actual real despues del cambio
+
+            if (status_res == SUSPENDED){
+                printf("\nBackground pid: %d, command: %s, %s, info: %d\n", 
+                    item->pgid, item->command, status_strings[status_res], info);
+                item->state = STOPPED;    // cambiamos estado a detenido
+
+            } else if (status_res == CONTINUED) {  // tareas que vuelven a ejecutarse despues de estar suspendidas
+                printf("\nBackground pid: %d, command: %s, %s, info: %d\n",
+                    item->pgid, item->command, status_strings[status_res], info);
+                item->state = BACKGROUND;  // Se reanuda ejecución en segundo plano
+
+            } else if (status_res == EXITED){
+                printf("\nBackground pid: %d, command: %s, %s, info: %d\n", 
+                    item->pgid, item->command, status_strings[status_res], info);
+                delete_job(tareas, item);        // borramos tarea de la lista
+            } 
+       }
+       item = next_item; //  Pasas al siguiente elemento
+    } 
+    unblock_SIGCHLD();
+}
 
 int main(void)
 {
@@ -31,7 +73,12 @@ int main(void)
     int info;                         // Información adicional sobre cómo terminó el proceso
 
 
+    job *item;   // declara para poder usar en new y add job
+
     ignore_terminal_signals();   // ignora senales
+    // SIGCHLD → lanza señal al padre cuando el hijo termina o se suspende (creo)
+    signal(SIGCHLD, manejador);  //  es como un trycatch que maneja las señales de los hijos en la lista
+    tareas = new_list("tareas");   // crear lista
 
 	while (1)   // Bucle principal del shell, se ejecuta indefinidamente, (hasta ^D)
 	{   		
@@ -63,10 +110,15 @@ int main(void)
         if (pid_fork > 0){       // padre
 
             if (background == 0){   // foreground (==0)      // wuntraced -> suspendido (en waitpid para saber)
+
                 waitpid(pid_fork, &status, WUNTRACED);      // espera a q el hijo cambie de estado y recoge su pid, los punteros(*) los pasamos por direccion(&) 
                 set_terminal(getpid());                       // shell vuelve a tomar el control del terminal
                 status_res = analyze_status(status, &info);    // almacena el estado en el q termino
                 if (status_res == SUSPENDED){                  // maneja estados -> suspendido
+                    block_SIGCHLD();
+                    item = new_job(pid_fork, args[0], FOREGROUND);  // crea un nuevo job
+                    add_job(tareas, item);                          // mete job a la lista
+                    unblock_SIGCHLD();
                     printf("\nForeground pid: %d, command: %s, %s, info: %d\n", 
                     pid_fork, args[0], status_strings[status_res], info);   // status_strings muestra estado
                 } else if (status_res == EXITED){
@@ -77,6 +129,10 @@ int main(void)
                 }
 
             } else {    // Background (==1)
+                block_SIGCHLD();
+                item = new_job(pid_fork, args[0], BACKGROUND);  // crea un nuevo job
+                add_job(tareas, item);                          // mete job a la lista
+                unblock_SIGCHLD();
                 printf("\nBackground job running... pid: %d, command: %s\n", pid_fork, args[0]); // %s (string cualquier), %d (decimal)
             }
 
@@ -95,3 +151,6 @@ int main(void)
 
 	} /* End while */
 }
+
+
+// error de violacion de segmento → fuimos a alguna parte en memoria q no deberiamos ir
