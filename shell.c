@@ -74,6 +74,7 @@ int main(void)
 
 
     job *item;   // declara para poder usar en new y add job
+    int primerplano = 0;   // variable bool (false 0, true 1)
 
     ignore_terminal_signals();   // ignora senales
     // SIGCHLD → lanza señal al padre cuando el hijo termina o se suspende (creo)
@@ -94,7 +95,56 @@ int main(void)
         }
         if(!strcmp(args[0], "logout")){
             exit(0);                // termina el programa
+            
         }
+        if(!strcmp(args[0], "jobs")){   // imprime la lista de tareas en segundo plano y suspendidas
+            block_SIGCHLD();
+            print_job_list(tareas);
+            unblock_SIGCHLD();
+            if (empty_list(tareas)) {
+                printf("No hay tareas en segundo plano ni suspendidas\n");
+            }
+            continue;              
+
+        }
+        if(!strcmp(args[0], "bg")){     // reanuda un proceso detenido(ctrl+Z), pero deja q se ejecute en segundo plano
+            block_SIGCHLD();
+            int pos = 1;            // empieza en 1
+            if (args[1] != NULL){   // introducio un num
+                pos = atoi(args[1]);  // convierte args[1] (string) a un entero. pos es lo q introdujo el usuario
+            }
+            item = get_item_bypos(tareas, pos);     // asegura pos correcta. y saca el item (que es un puntero a job)
+            if ((item != NULL) && (item->state == STOPPED)){  
+                item->state = BACKGROUND;             // cambiamos estado a background
+                killpg(item->pgid, SIGCONT);         //  sigcont (señal q reanuda proceso detenido). killpg (kill process group). Reanuda todos los procesos del grupo que fueron detenidos
+                printf("Reanudando en segundo plano: pid %d, comando %s\n", item->pgid, item->command);
+            } else {
+                printf("No hay tarea suspendida en esa posición.\n");
+            }
+            unblock_SIGCHLD();
+            continue;
+
+        }
+        if(!strcmp(args[0], "fg")){   // pone en primer plano una tarea q estaba en segundo plano o suspendida
+            block_SIGCHLD();
+            int pos = 1;         
+            primerplano = 1;    // true (indica q cuando llega a la parte del padre hay ya un proceso en primer plano)  
+            if (args[1] != NULL){   
+                pos = atoi(args[1]);  
+            }
+            item = get_item_bypos(tareas, pos);     
+            if(item != NULL){          // solo chequeamos eso pq en la lista solo guardamos los q estan en background o suspendidos
+                set_terminal(item->pgid);             // ceder terminal 
+                if (item->state == SUSPENDED){
+                    killpg(item->pgid, SIGCONT);       // señal q reanuda proceso detenido
+                }
+                pid_fork = item->pgid;                //  el nuevo hijo es el item, q se usa para todo lo e abajo con el padre
+                delete_job(tareas, item);             // elimina o borra item de la lista pq va a primerplano, no hace falta actualizar estado a foreground 
+            } else {
+                printf("No hay tarea en esa posición para primer plano.\n");
+            }
+            unblock_SIGCHLD();                     // desbloquea y no pone continue para que siga con la parte del padre  
+        }    
 
 		/**
          * Pasos:
@@ -105,9 +155,11 @@ int main(void)
          * (5) Vuelve a pedir otro comando al usuario
         */
 
-        pid_fork = fork();    // crea una copia exacta (hijo) 
-
-        if (pid_fork > 0){       // padre
+        if (!primerplano){   // == 0 (false). si no hay procesos en primerplano hace el fork, y si hay no lo hace
+            pid_fork = fork();    // crea una copia exacta (hijo) 
+        }
+        
+        if (pid_fork > 0){       // padre. hace las cosas o sobre el pid_fork de arriba o sobre el q esta en fg (item)
 
             if (background == 0){   // foreground (==0)      // wuntraced -> suspendido (en waitpid para saber)
 
@@ -116,7 +168,7 @@ int main(void)
                 status_res = analyze_status(status, &info);    // almacena el estado en el q termino
                 if (status_res == SUSPENDED){                  // maneja estados -> suspendido
                     block_SIGCHLD();
-                    item = new_job(pid_fork, args[0], FOREGROUND);  // crea un nuevo job
+                    item = new_job(pid_fork, args[0], STOPPED);  // crea un nuevo job
                     add_job(tareas, item);                          // mete job a la lista
                     unblock_SIGCHLD();
                     printf("\nForeground pid: %d, command: %s, %s, info: %d\n", 
@@ -127,6 +179,8 @@ int main(void)
                     pid_fork, args[0], status_strings[status_res], info);
                     } 
                 }
+                primerplano = 0;      // ya no hay procesos en primer plano (lo ponemos en 0)
+
 
             } else {    // Background (==1)
                 block_SIGCHLD();
@@ -142,6 +196,7 @@ int main(void)
             if (background == 0){   // foreground
                 set_terminal(getpid());  // toma control del terminal
             } 
+            printf("Hijo listo, pid: %d, background: %d\n", getpid(), background);
             restore_terminal_signals();  // permite que el hijo reciba señales como Ctrl+C
             execvp(args[0], args);     // cargar la libreria y sustituye codigo del hijo con el comando q le pasamos, args[0] es el comando, args (opciones)
             printf("\nError. comando %s no encontrado\n", args[0]);
