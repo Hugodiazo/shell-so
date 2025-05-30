@@ -71,6 +71,8 @@ int main(void)
     int status;                       // Estado devuelto por waitpid
     enum status status_res;           // Estado interpretado (salió bien, fue detenido, etc.)
     int info;                         // Información adicional sobre cómo terminó el proceso
+    char *file_in = NULL;
+    char *file_out = NULL;
 
 
     job *item;   // declara para poder usar en new y add job
@@ -86,6 +88,8 @@ int main(void)
 		printf("COMMAND->");
 		fflush(stdout); // Fuerza muestrar mensaje
 		get_command(inputBuffer, MAX_LINE, args, &background);  /*  Lee comando del usuario*/
+
+        parse_redirections(args, &file_in, &file_out);     // detectar si hay > o < (redirecciones) en el comando. y guarda en file_in y/o file_out los nombres de los archivos.
 		
 		if(args[0]==NULL) continue;   // Si no se escribio nada, continue vuelve la while
 
@@ -95,7 +99,7 @@ int main(void)
         }
         if(!strcmp(args[0], "logout")){
             exit(0);                // termina el programa
-            
+
         }
         if(!strcmp(args[0], "jobs")){   // imprime la lista de tareas en segundo plano y suspendidas
             block_SIGCHLD();
@@ -166,6 +170,7 @@ int main(void)
                 waitpid(pid_fork, &status, WUNTRACED);      // espera a q el hijo cambie de estado y recoge su pid, los punteros(*) los pasamos por direccion(&) 
                 set_terminal(getpid());                       // shell vuelve a tomar el control del terminal
                 status_res = analyze_status(status, &info);    // almacena el estado en el q termino
+
                 if (status_res == SUSPENDED){                  // maneja estados -> suspendido
                     block_SIGCHLD();
                     item = new_job(pid_fork, args[0], STOPPED);  // crea un nuevo job
@@ -173,6 +178,7 @@ int main(void)
                     unblock_SIGCHLD();
                     printf("\nForeground pid: %d, command: %s, %s, info: %d\n", 
                     pid_fork, args[0], status_strings[status_res], info);   // status_strings muestra estado
+
                 } else if (status_res == EXITED){
                     if(info != 255){    // si no es comando de error imprime, sino se termina
                     printf("\nForeground pid: %d, command: %s, %s, info: %d\n", 
@@ -196,6 +202,31 @@ int main(void)
             if (background == 0){   // foreground
                 set_terminal(getpid());  // toma control del terminal
             } 
+
+            // Redirección de entrada (stdin)  " < archivo"
+            if (file_in != NULL) {
+                FILE *f = fopen(file_in, "r");        // fopen(...) -> Abre el archivo en modo lectura 
+                if (f != NULL) {
+                    dup2(fileno(f), STDIN_FILENO);  // duplica el descriptor sobre stdin. "todo lo que se lea por stdin (como scanf, cat, o wc) va a salir del archivo file_in en lugar del teclado"
+                    fclose(f);  // ya no se necesita el FILE*
+                } else {
+                    perror("Error al abrir archivo de entrada");
+                    exit(EXIT_FAILURE);  // si falla, aborta el hijo
+                }
+            }
+
+            // Redirección de salida (stdout)  " > archivo".  (muestra "   " leyendo del archivo)
+            if (file_out != NULL) {
+                FILE *f = fopen(file_out, "w");      // fopen(...) -> Abre el archivo en modo escritura (crea o sobreescribe)
+                if (f != NULL) {
+                    dup2(fileno(f), STDOUT_FILENO);  // duplica sobre stdout. “Todo lo que se imprima por stdout, mandalo al archivo abierto”
+                    fclose(f);
+                } else {
+                    perror("Error al abrir archivo de salida");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
             printf("Hijo listo, pid: %d, background: %d\n", getpid(), background);
             restore_terminal_signals();  // permite que el hijo reciba señales como Ctrl+C
             execvp(args[0], args);     // cargar la libreria y sustituye codigo del hijo con el comando q le pasamos, args[0] es el comando, args (opciones)
