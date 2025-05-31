@@ -227,7 +227,7 @@ int main(void)
                 }
             }
 
-            printf("Hijo listo, pid: %d, background: %d\n", getpid(), background);
+            // printf("Hijo listo, pid: %d, background: %d\n", getpid(), background);
             restore_terminal_signals();  // permite que el hijo reciba señales como Ctrl+C
             execvp(args[0], args);     // cargar la libreria y sustituye codigo del hijo con el comando q le pasamos, args[0] es el comando, args (opciones)
             printf("\nError. comando %s no encontrado\n", args[0]);
@@ -240,3 +240,55 @@ int main(void)
 
 
 // error de violacion de segmento → fuimos a alguna parte en memoria q no deberiamos ir
+
+
+
+// --------  TEST  ----------------------------
+
+// (base) Air-de-Hugo:proyecto_shell_esqueleto hugodiazo$ ./shell
+
+// COMMAND->ls
+// flujo-padre-hijo.png    frutas.txt              job_control.h           shell
+// flujo-senal-zombie.png  job_control.c           resultado.txt           shell.c
+// Foreground pid: 940, command: ls, Exited, info: 0
+
+// COMMAND->sleep 5
+// Foreground pid: 1072, command: sleep, Exited, info: 0
+
+// COMMAND->sleep 10 &
+// Background job running... pid: 1380, command: sleep
+
+// COMMAND->jobs
+// Contents of tareas:
+//  [1] pid: 1380, command: sleep, state: Background
+
+// COMMAND->
+// Background pid: 1380, command: sleep, Exited, info: 0
+
+// COMMAND->sleep 50  
+// ^Z
+// Foreground pid: 1897, command: sleep, Suspended, info: 18
+
+// COMMAND->jobs
+// Contents of tareas:
+//  [1] pid: 1897, command: sleep, state: Stopped
+
+// COMMAND->bg 1
+// Reanudando en segundo plano: pid 1897, comando sleep
+
+// COMMAND->jobs
+// Contents of tareas:
+//  [1] pid: 1897, command: sleep, state: Background
+
+// COMMAND->fg 1
+// Foreground pid: 1897, command: fg, Exited, info: 0
+
+// COMMAND->jobs
+// Contents of tareas:
+// No hay tareas en segundo plano ni suspendidas
+
+// COMMAND->sleep 20
+// ^CCOMMAND->jobs
+// Contents of tareas:
+// No hay tareas en segundo plano ni suspendidas
+// COMMAND->logout
